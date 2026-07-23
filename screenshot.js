@@ -68,17 +68,6 @@ async function runScreenshot(inputExcelPath, outputDir) {
       // 等待页面完全加载
       await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
 
-      // 强制使用系统 Emoji 字体（解决 Emoji 方块问题）
-      await page.addStyleTag({
-        content: `
-    *,
-    *::before,
-    *::after {
-      font-family: "Noto Color Emoji", "Symbola", "Segoe UI Emoji", "Apple Color Emoji", sans-serif !important;
-    }
-  `,
-      });
-
       // 关闭弹窗（与原来完全一致）
       const closeSelectors = [
         ".close",

@@ -35,7 +35,13 @@ async function runScreenshot(inputExcelPath, outputDir) {
   // 启动浏览器（headless: true 适合服务器）
   const browser = await chromium.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"], // Linux 服务器可能需要
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage", // 防止 /dev/shm 不足
+      "--max_old_space_size=512", // 限制 V8 内存 512MB
+      "--disable-gpu", // 禁用 GPU 加速（节省内存）
+    ],
   });
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },

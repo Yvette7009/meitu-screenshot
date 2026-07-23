@@ -56,13 +56,11 @@ RUN apt-get update && apt-get install -y \
     fonts-wqy-zenhei \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
-    fonts-symbola \                  # ← 新增：备选 Emoji 字体
-    xfonts-base \ 
+    fonts-symbola \
     fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
-# 强制刷新字体缓存并打印日志，确认 Emoji 字体已加载
-RUN fc-cache -fv && fc-list | grep -i emoji
+RUN fc-cache -fv
 
 WORKDIR /app
 

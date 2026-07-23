@@ -1,11 +1,11 @@
 FROM node:18-slim
 
-# 设置语言环境为中文（让浏览器优先用中文字体）
+# 设置语言环境为中文
 ENV LANG=zh_CN.UTF-8
 ENV LANGUAGE=zh_CN:zh
 ENV LC_ALL=zh_CN.UTF-8
 
-# 安装系统依赖 + 中文字体
+# 安装系统依赖 + 中文字体 + Emoji字体
 RUN apt-get update && apt-get install -y \
     libnss3 \
     libatk-bridge2.0-0 \
@@ -55,14 +55,16 @@ RUN apt-get update && apt-get install -y \
     libxinerama1 \
     libxrender1 \
     libz3-4 \
-    # 👇 以下是中文字体
+    # 👇 中文字体
     fonts-wqy-zenhei \
     fonts-noto-cjk \
+    # 👇 Emoji 字体（新增）
+    fonts-noto-color-emoji \
     fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
-# 刷新字体缓存（并验证是否安装成功）
-RUN fc-cache -fv && fc-list :lang=zh | head -5
+# 刷新字体缓存
+RUN fc-cache -fv && fc-list :lang=zh | head -5 && fc-list | grep -i emoji
 
 # 创建工作目录
 WORKDIR /app

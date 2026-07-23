@@ -1,11 +1,9 @@
 FROM node:18-slim
 
-# 设置语言环境为中文
 ENV LANG=zh_CN.UTF-8
 ENV LANGUAGE=zh_CN:zh
 ENV LC_ALL=zh_CN.UTF-8
 
-# 安装系统依赖 + 中文字体 + Emoji字体
 RUN apt-get update && apt-get install -y \
     libnss3 \
     libatk-bridge2.0-0 \
@@ -55,34 +53,23 @@ RUN apt-get update && apt-get install -y \
     libxinerama1 \
     libxrender1 \
     libz3-4 \
-    # 👇 中文字体
     fonts-wqy-zenhei \
     fonts-noto-cjk \
-    # 👇 Emoji 字体（新增）
     fonts-noto-color-emoji \
+    fonts-symbola \                  # ← 新增：备选 Emoji 字体
     fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
-# 刷新字体缓存
-RUN fc-cache -fv && fc-list :lang=zh | head -5 && fc-list | grep -i emoji
+RUN fc-cache -fv
 
-# 创建工作目录
 WORKDIR /app
 
-# 复制依赖文件
 COPY package*.json ./
-
-# 安装 Node 依赖
 RUN npm install
-
-# 安装 Playwright 浏览器
 RUN npx playwright install chromium
 
-# 复制项目源码
 COPY . .
 
-# 暴露端口
 EXPOSE 3000
 
-# 启动
 CMD ["node", "server.js"]

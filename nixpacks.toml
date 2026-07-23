@@ -1,0 +1,11 @@
+[phases.setup]
+# 这里列出 Playwright 在 Linux 环境运行所需的所有系统依赖包
+aptPkgs = [
+    "libnss3",
+    "libatk-bridge2.0-0",
+    "libdrm2",
+    "libxkbcommon0",
+    "libgbm1",
+    "libxshmfence1",
+    "libasound2"
+]

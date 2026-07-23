@@ -41,6 +41,10 @@ async function runScreenshot(inputExcelPath, outputDir) {
       "--disable-dev-shm-usage", // 防止 /dev/shm 不足
       "--max_old_space_size=512", // 限制 V8 内存 512MB
       "--disable-gpu", // 禁用 GPU 加速（节省内存）
+      // 👇 以下三个参数是专门为 Emoji 彩色字体加的
+      "--enable-features=ColorFont",
+      "--disable-features=Fontations",
+      "--force-color-profile=srgb",
     ],
   });
   const context = await browser.newContext({
@@ -67,7 +71,9 @@ async function runScreenshot(inputExcelPath, outputDir) {
       // 强制使用系统 Emoji 字体（解决 Emoji 方块问题）
       await page.addStyleTag({
         content: `
-    * {
+    *,
+    *::before,
+    *::after {
       font-family: "Noto Color Emoji", "Symbola", "Segoe UI Emoji", "Apple Color Emoji", sans-serif !important;
     }
   `,
@@ -165,6 +171,15 @@ async function runScreenshot(inputExcelPath, outputDir) {
       console.log("裁剪区域（文档坐标）:", finalClip);
 
       const filename = `${String(i + 1).padStart(3, "0")}_${author}.png`;
+
+      // 强制重绘（解决部分渲染问题）
+      await page.evaluate(() => {
+        document.body.style.display = "none";
+        // 强制回流
+        document.body.offsetHeight;
+        document.body.style.display = "";
+      });
+
       await page.screenshot({
         path: path.join(screenshotDir, filename),
         clip: finalClip,

@@ -1,7 +1,7 @@
 # 使用 Node.js 官方镜像
 FROM node:18-slim
 
-# 安装 Playwright 需要的所有系统依赖
+# 安装 Playwright 需要的所有系统依赖 + 中文字体
 RUN apt-get update && apt-get install -y \
     libnss3 \
     libatk-bridge2.0-0 \
@@ -51,7 +51,14 @@ RUN apt-get update && apt-get install -y \
     libxinerama1 \
     libxrender1 \
     libz3-4 \
+    # 👇 以下是新增的中文字体包
+    fonts-wqy-zenhei \
+    fonts-noto-cjk \
+    fontconfig \
     && rm -rf /var/lib/apt/lists/*
+
+# 刷新字体缓存（让系统识别新字体）
+RUN fc-cache -fv
 
 # 设置工作目录
 WORKDIR /app
@@ -62,7 +69,7 @@ COPY package*.json ./
 # 安装 Node.js 依赖
 RUN npm install
 
-# 安装 Playwright 浏览器（使用国内镜像加速，可选）
+# 安装 Playwright 浏览器
 RUN npx playwright install chromium
 
 # 复制所有源代码

@@ -89,7 +89,12 @@ async function runScreenshot(inputExcelPath, outputDir) {
       await page.keyboard.press("Escape");
       await page.waitForTimeout(1000);
 
+      // 定义选择器
       const parentSelector = "body > div.page.detail.js-page > div.main";
+      const topBoundarySelector =
+        "body > div.page.detail.js-page > div.main > div.detail-cover.js-detail-cover.swiper-container.swiper-container-horizontal";
+      const bottomBoundarySelector =
+        "body > div.page.detail.js-page > div.main > div.detail-footer";
 
       // 等待父容器可见
       await page.waitForSelector(parentSelector, {
@@ -101,78 +106,52 @@ async function runScreenshot(inputExcelPath, outputDir) {
         .catch(() => {});
       await page.waitForTimeout(2000);
 
-      // 计算裁剪区域（基于文档坐标）
+      // 计算裁剪区域：从 topBoundary 顶部 到 bottomBoundary 底部
       const clipRect = await page.evaluate(
-        ({ parentSel, text1, text2, offset }) => {
+        ({ parentSel, topSel, bottomSel }) => {
           const parent = document.querySelector(parentSel);
-          if (!parent) return null;
+          const topEl = document.querySelector(topSel);
+          const bottomEl = document.querySelector(bottomSel);
+
+          if (!parent || !topEl || !bottomEl) {
+            // 如果任何一个找不到，降级：截取整个父容器
+            return null;
+          }
+
           const parentRect = parent.getBoundingClientRect();
+          const topRect = topEl.getBoundingClientRect();
+          const bottomRect = bottomEl.getBoundingClientRect();
+
           const parentDocX = parentRect.left + window.scrollX;
           const parentDocY = parentRect.top + window.scrollY;
 
-          // 查找所有需要裁剪的底部元素
-          const targets = [];
-          // 1. 通过类名查找“今日热门推荐”
-          const hot = document.querySelector("div.Widget.other-content");
-          if (hot) targets.push(hot);
-          // 2. 通过类名查找“打开app查看更多精彩内容”
-          const footer = document.querySelector("div.Widget.footer.js-footer");
-          if (footer) targets.push(footer);
-          // 3. 如果上面没找到，通过文本匹配作为备选
-          if (targets.length === 0) {
-            const all = document.querySelectorAll("*");
-            for (const el of all) {
-              const text = el.textContent.trim();
-              if (text === text1 || text.includes(text2)) {
-                targets.push(el);
-              }
-            }
-          }
+          // 裁剪起点：topEl 的顶部（文档坐标）
+          const topY = topRect.top + window.scrollY;
+          // 裁剪终点：bottomEl 的底部（文档坐标）
+          const bottomY = bottomRect.bottom + window.scrollY;
 
-          if (targets.length === 0) {
-            return {
-              x: parentDocX,
-              y: parentDocY,
-              width: parentRect.width,
-              height: parentRect.height,
-            };
-          }
-
-          // 取所有目标元素中最靠上的一个
-          let minTop = Infinity;
-          for (const el of targets) {
-            const rect = el.getBoundingClientRect();
-            const docY = rect.top + window.scrollY;
-            if (docY < minTop) minTop = docY;
-          }
-
-          // 裁剪高度 = 最靠上的底部元素顶部 - 父容器顶部 - 额外偏移量
-          let height = minTop - parentDocY - offset;
+          // 裁剪高度 = 终点 - 起点
+          const height = bottomY - topY;
           if (height <= 0) {
-            return {
-              x: parentDocX,
-              y: parentDocY,
-              width: parentRect.width,
-              height: parentRect.height,
-            };
+            return null;
           }
+
           return {
-            x: parentDocX,
-            y: parentDocY,
+            x: parentDocX, // 使用父容器的左边缘作为 x
+            y: topY,
             width: parentRect.width,
             height: height,
           };
         },
         {
           parentSel: parentSelector,
-          text1: "今日热门推荐",
-          text2: "打开app查看更多精彩内容", // 注意这里不带 >
-          offset: OFFSET, // ← 传入偏移量
+          topSel: topBoundarySelector,
+          bottomSel: bottomBoundarySelector,
         },
       );
 
       if (!clipRect || clipRect.width <= 0 || clipRect.height <= 0) {
-        throw new Error("裁剪区域无效，高度或宽度为0");
+        throw new Error("裁剪区域无效，可能元素未找到或位置计算错误");
       }
 
       const finalClip = {
@@ -183,16 +162,8 @@ async function runScreenshot(inputExcelPath, outputDir) {
       };
       console.log("裁剪区域（文档坐标）:", finalClip);
 
+      // 截图（使用 fullPage: true 保证基于文档坐标）
       const filename = `${String(i + 1).padStart(3, "0")}_${author}.png`;
-
-      // 强制重绘（解决部分渲染问题）
-      await page.evaluate(() => {
-        document.body.style.display = "none";
-        // 强制回流
-        document.body.offsetHeight;
-        document.body.style.display = "";
-      });
-
       await page.screenshot({
         path: path.join(screenshotDir, filename),
         clip: finalClip,

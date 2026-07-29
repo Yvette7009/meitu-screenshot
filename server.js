@@ -8,9 +8,37 @@ const { runScreenshot } = require("./screenshot");
 console.log("🚀 正在启动服务器...");
 
 const app = express();
-const upload = multer({ dest: "uploads/" });
+const CLEANUP_DAYS = 5;
+
+// 文件上传配置（增加大小限制）
+const upload = multer({
+  dest: "uploads/",
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB
+  },
+});
 
 app.use(express.static("public"));
+
+// 清理旧目录函数
+async function cleanupOldOutputs() {
+  const outputRoot = path.join(__dirname, "output");
+  if (!fs.existsSync(outputRoot)) return;
+
+  const now = Date.now();
+  const dirs = fs.readdirSync(outputRoot, { withFileTypes: true });
+  for (const dir of dirs) {
+    if (dir.isDirectory()) {
+      const dirPath = path.join(outputRoot, dir.name);
+      const stat = fs.statSync(dirPath);
+      const ageDays = (now - stat.mtime.getTime()) / (1000 * 60 * 60 * 24);
+      if (ageDays > CLEANUP_DAYS) {
+        await fs.remove(dirPath);
+        console.log(`🧹 清理旧目录: ${dir.name}`);
+      }
+    }
+  }
+}
 
 app.post("/upload", upload.single("excel"), async (req, res) => {
   console.log("📥 收到上传请求");
@@ -27,6 +55,9 @@ app.post("/upload", upload.single("excel"), async (req, res) => {
     const result = await runScreenshot(inputPath, outputDir);
 
     await fs.remove(inputPath);
+
+    // 异步清理旧目录（不阻塞响应）
+    cleanupOldOutputs().catch((err) => console.warn("清理旧目录时出错:", err));
 
     res.json({
       success: true,
@@ -51,16 +82,32 @@ app.get("/download/:filename", (req, res) => {
   if (!fs.existsSync(outputRoot)) {
     return res.status(404).send("文件不存在");
   }
-  const dirs = fs.readdirSync(outputRoot, { withFileTypes: true });
+
+  // 按修改时间倒序排列，最新的目录优先
+  const dirs = fs
+    .readdirSync(outputRoot, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => ({
+      name: d.name,
+      path: path.join(outputRoot, d.name),
+      mtime: fs.statSync(path.join(outputRoot, d.name)).mtime,
+    }))
+    .sort((a, b) => b.mtime - a.mtime);
+
   for (const dir of dirs) {
-    if (dir.isDirectory()) {
-      const filePath = path.join(outputRoot, dir.name, filename);
-      if (fs.existsSync(filePath)) {
-        return res.download(filePath);
-      }
+    const filePath = path.join(dir.path, filename);
+    if (fs.existsSync(filePath)) {
+      return res.download(filePath);
     }
   }
+
   res.status(404).send("文件不存在");
+});
+
+// 增加超时时间（处理大型 Excel）
+app.use((req, res, next) => {
+  req.setTimeout(600000); // 10 分钟
+  next();
 });
 
 const PORT = process.env.PORT || 3000;

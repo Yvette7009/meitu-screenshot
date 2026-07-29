@@ -199,7 +199,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
   await browser.close();
 
   // ---------- 生成结果 Excel ----------
-  const resultExcelPath = path.join(outputDir, "result.xlsx");
+  const resultExcelPath = path.join(outputDir, `result_${Date.now()}.xlsx`);
   const resultWorkbook = new ExcelJS.Workbook();
   const resultSheet = resultWorkbook.addWorksheet("截图结果");
   resultSheet.columns = [
@@ -261,7 +261,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
   // ---------- 生成失败记录（如果有） ----------
   let failedExcelPath = null;
   if (failed.length > 0) {
-    failedExcelPath = path.join(outputDir, "failed.xlsx");
+    failedExcelPath = path.join(outputDir, `failed_${Date.now()}.xlsx`);
     const failedWorkbook = new ExcelJS.Workbook();
     const failedSheet = failedWorkbook.addWorksheet("失败记录");
     failedSheet.columns = [

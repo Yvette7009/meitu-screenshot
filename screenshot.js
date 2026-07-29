@@ -5,9 +5,7 @@ const XLSX = require("xlsx");
 const fs = require("fs-extra");
 const path = require("path");
 const sizeOf = require("image-size");
-const hideText1 = "今日热门推荐";
-const hideText2 = "打开app查看更多精彩内容>";
-const OFFSET = 20; // 可以保留一点余量
+const OFFSET = 30; // 可以保留一点余量
 
 // 安全命名函数
 function safeName(name) {
@@ -92,7 +90,6 @@ async function runScreenshot(inputExcelPath, outputDir) {
       await page.waitForTimeout(1000);
 
       const parentSelector = "body > div.page.detail.js-page > div.main";
-      const hideText = "打开app查看更多精彩内容>";
 
       // 等待父容器可见
       await page.waitForSelector(parentSelector, {
@@ -113,21 +110,26 @@ async function runScreenshot(inputExcelPath, outputDir) {
           const parentDocX = parentRect.left + window.scrollX;
           const parentDocY = parentRect.top + window.scrollY;
 
-          const all = parent.querySelectorAll("*");
-          let hide = null;
-          let maxTop = -Infinity;
-          // 查找包含 text1 或 text2 的元素，取最靠下的一个
-          for (const el of all) {
-            const txt = el.textContent.trim();
-            if (txt === text1 || txt === text2) {
-              const rect = el.getBoundingClientRect();
-              if (rect.top > maxTop) {
-                maxTop = rect.top;
-                hide = el;
+          // 查找所有需要裁剪的底部元素
+          const targets = [];
+          // 1. 通过类名查找“今日热门推荐”
+          const hot = document.querySelector("div.Widget.other-content");
+          if (hot) targets.push(hot);
+          // 2. 通过类名查找“打开app查看更多精彩内容”
+          const footer = document.querySelector("div.Widget.footer.js-footer");
+          if (footer) targets.push(footer);
+          // 3. 如果上面没找到，通过文本匹配作为备选
+          if (targets.length === 0) {
+            const all = document.querySelectorAll("*");
+            for (const el of all) {
+              const text = el.textContent.trim();
+              if (text === text1 || text.includes(text2)) {
+                targets.push(el);
               }
             }
           }
-          if (!hide) {
+
+          if (targets.length === 0) {
             return {
               x: parentDocX,
               y: parentDocY,
@@ -135,9 +137,17 @@ async function runScreenshot(inputExcelPath, outputDir) {
               height: parentRect.height,
             };
           }
-          const hideRect = hide.getBoundingClientRect();
-          const hideDocY = hideRect.top + window.scrollY;
-          let height = hideDocY - parentDocY - offset;
+
+          // 取所有目标元素中最靠上的一个
+          let minTop = Infinity;
+          for (const el of targets) {
+            const rect = el.getBoundingClientRect();
+            const docY = rect.top + window.scrollY;
+            if (docY < minTop) minTop = docY;
+          }
+
+          // 裁剪高度 = 最靠上的底部元素顶部 - 父容器顶部 - 额外偏移量
+          let height = minTop - parentDocY - offset;
           if (height <= 0) {
             return {
               x: parentDocX,
@@ -155,9 +165,9 @@ async function runScreenshot(inputExcelPath, outputDir) {
         },
         {
           parentSel: parentSelector,
-          text1: hideText1,
-          text2: hideText2,
-          offset: OFFSET,
+          text1: "今日热门推荐",
+          text2: "打开app查看更多精彩内容", // 注意这里不带 >
+          offset: OFFSET, // ← 传入偏移量
         },
       );
 

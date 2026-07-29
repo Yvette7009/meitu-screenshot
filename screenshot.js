@@ -103,14 +103,15 @@ async function runScreenshot(inputExcelPath, outputDir) {
 
       // 计算裁剪区域（基于文档坐标）
       const clipRect = await page.evaluate(
-        ({ parentSel, text }) => {
+        ({ parentSel, text, offset }) => {
           const parent = document.querySelector(parentSel);
           if (!parent) return null;
           const parentRect = parent.getBoundingClientRect();
           const parentDocX = parentRect.left + window.scrollX;
           const parentDocY = parentRect.top + window.scrollY;
 
-          const all = document.querySelectorAll("*");
+          // 只在父容器内查找，避免匹配到其他地方
+          const all = parent.querySelectorAll("*");
           let hide = null;
           for (const el of all) {
             if (el.textContent.trim() === text) {
@@ -128,7 +129,8 @@ async function runScreenshot(inputExcelPath, outputDir) {
           }
           const hideRect = hide.getBoundingClientRect();
           const hideDocY = hideRect.top + window.scrollY;
-          const height = hideDocY - parentDocY;
+          // 裁剪高度 = hide 顶部 - 父容器顶部 - 额外偏移量（往上多裁一点）
+          const height = hideDocY - parentDocY - offset;
           if (height <= 0) {
             return {
               x: parentDocX,
@@ -144,7 +146,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
             height: height,
           };
         },
-        { parentSel: parentSelector, text: hideText },
+        { parentSel: parentSelector, text: hideText, offset: 30 }, // ← 这里 offset 设为 30 像素，可调整
       );
 
       if (!clipRect || clipRect.width <= 0 || clipRect.height <= 0) {

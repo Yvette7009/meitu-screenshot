@@ -5,6 +5,7 @@ const XLSX = require("xlsx");
 const fs = require("fs-extra");
 const path = require("path");
 const sizeOf = require("image-size");
+const OFFSET = 138;
 
 // 安全命名函数
 function safeName(name) {
@@ -130,7 +131,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
           const hideRect = hide.getBoundingClientRect();
           const hideDocY = hideRect.top + window.scrollY;
           // 裁剪高度 = hide 顶部 - 父容器顶部 - 额外偏移量（往上多裁一点）
-          const height = hideDocY - parentDocY - offset;
+          let height = hideDocY - parentDocY - offset;
           if (height <= 0) {
             return {
               x: parentDocX,
@@ -146,7 +147,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
             height: height,
           };
         },
-        { parentSel: parentSelector, text: hideText, offset: 138 }, // ← 这里 offset 设为 30 像素，可调整
+        { parentSel: parentSelector, text: hideText, offset: OFFSET }, // ← 这里 offset 设为 30 像素，可调整
       );
 
       if (!clipRect || clipRect.width <= 0 || clipRect.height <= 0) {

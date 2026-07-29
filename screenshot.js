@@ -146,7 +146,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
             height: height,
           };
         },
-        { parentSel: parentSelector, text: hideText, offset: 30 }, // ← 这里 offset 设为 30 像素，可调整
+        { parentSel: parentSelector, text: hideText, offset: 138 }, // ← 这里 offset 设为 30 像素，可调整
       );
 
       if (!clipRect || clipRect.width <= 0 || clipRect.height <= 0) {

@@ -108,36 +108,41 @@ async function runScreenshot(inputExcelPath, outputDir) {
 
       // 计算裁剪区域：从 topBoundary 顶部 到 bottomBoundary 底部
       const clipRect = await page.evaluate(
-        ({ parentSel, topSel, bottomSel }) => {
+        ({ parentSel, topSel, bottomText }) => {
           const parent = document.querySelector(parentSel);
           const topEl = document.querySelector(topSel);
-          const bottomEl = document.querySelector(bottomSel);
+          if (!parent || !topEl) return null;
 
-          if (!parent || !topEl || !bottomEl) {
-            // 如果任何一个找不到，降级：截取整个父容器
-            return null;
+          // 查找包含“打开app”文本的节点（最好是最小容器）
+          const all = document.querySelectorAll("*");
+          let bottomEl = null;
+          for (const el of all) {
+            const text = el.textContent.trim();
+            if (text.includes("打开app查看更多精彩内容")) {
+              bottomEl = el;
+              break;
+            }
           }
+          if (!bottomEl) {
+            // 如果找不到，降级为使用 detail-footer 选择器
+            bottomEl = document.querySelector("div.Widget.footer.js-footer");
+          }
+          if (!bottomEl) return null;
 
           const parentRect = parent.getBoundingClientRect();
           const topRect = topEl.getBoundingClientRect();
           const bottomRect = bottomEl.getBoundingClientRect();
 
           const parentDocX = parentRect.left + window.scrollX;
-          const parentDocY = parentRect.top + window.scrollY;
-
-          // 裁剪起点：topEl 的顶部（文档坐标）
           const topY = topRect.top + window.scrollY;
-          // 裁剪终点：bottomEl 的底部（文档坐标）
-          const bottomY = bottomRect.bottom + window.scrollY;
+          // 终点：bottomEl 的底部（加上少量余量确保包含完整）
+          const bottomY = bottomRect.bottom + window.scrollY + 5; // 多 5px 以防万一
 
-          // 裁剪高度 = 终点 - 起点
           const height = bottomY - topY;
-          if (height <= 0) {
-            return null;
-          }
+          if (height <= 0) return null;
 
           return {
-            x: parentDocX, // 使用父容器的左边缘作为 x
+            x: parentDocX,
             y: topY,
             width: parentRect.width,
             height: height,
@@ -146,7 +151,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
         {
           parentSel: parentSelector,
           topSel: topBoundarySelector,
-          bottomSel: bottomBoundarySelector,
+          bottomText: "打开app查看更多精彩内容",
         },
       );
 

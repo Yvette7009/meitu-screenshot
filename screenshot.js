@@ -1,4 +1,8 @@
 // screenshot.js
+const Jimp = require("jimp");
+// 如果安装的是新版，可能需要：
+// const Jimp = require('jimp').default;
+// 如果报错，请用: const { Jimp } = require('jimp');
 const { chromium } = require("playwright");
 const ExcelJS = require("exceljs");
 const XLSX = require("xlsx");
@@ -147,7 +151,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
         {
           parentSel: parentSelector,
           topSel: topBoundarySelector,
-          bottomText: "打开app查看更多精彩内容",
+          bottomText: "打开app查看更多精彩内容>",
         },
       );
 
@@ -165,11 +169,31 @@ async function runScreenshot(inputExcelPath, outputDir) {
 
       // 5. 截图
       const filename = `${String(i + 1).padStart(3, "0")}_${author}.png`;
+      const tempPath = path.join(screenshotDir, `temp_${filename}`);
+
+      // 截图到临时文件
       await page.screenshot({
-        path: path.join(screenshotDir, filename),
+        path: tempPath,
         clip: finalClip,
         fullPage: true,
       });
+
+      // 裁剪底部固定像素
+      const BOTTOM_CROP = 138; // 可调整
+      const image = await Jimp.read(tempPath);
+      const { width, height } = image.bitmap;
+      const newHeight = height - BOTTOM_CROP;
+      if (newHeight > 0) {
+        await image
+          .crop(0, 0, width, newHeight)
+          .writeAsync(path.join(screenshotDir, filename));
+      } else {
+        // 如果裁剪后高度为0，直接保存原图
+        await fs.copy(tempPath, path.join(screenshotDir, filename));
+      }
+      // 删除临时文件
+      await fs.remove(tempPath);
+
       console.log("截图完成:", filename);
 
       result.push({

@@ -53,7 +53,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
     "body > div.page.detail.js-page > div.main > div.detail-cover.js-detail-cover.swiper-container.swiper-container-horizontal";
 
   // ===== 可调整参数 =====
-  const BOTTOM_CROP = 138; // 想要裁掉的底部像素数，可调整
+  const BOTTOM_CROP = 155; // 想要裁掉的底部像素数，可调整
   // =====================
 
   for (let i = 0; i < rows.length; i++) {

@@ -1,4 +1,4 @@
-// screenshot.js - 最终稳定版
+// screenshot.js
 const { chromium } = require("playwright");
 const ExcelJS = require("exceljs");
 const XLSX = require("xlsx");
@@ -6,6 +6,7 @@ const fs = require("fs-extra");
 const path = require("path");
 const sizeOf = require("image-size");
 
+// 安全命名函数
 function safeName(name) {
   return String(name)
     .replace(/[\\/:*?"<>|]/g, "")
@@ -13,6 +14,9 @@ function safeName(name) {
     .slice(0, 40);
 }
 
+/**
+ * 执行批量截图
+ */
 async function runScreenshot(inputExcelPath, outputDir) {
   await fs.ensureDir(outputDir);
   const screenshotDir = path.join(outputDir, "screenshots");
@@ -43,6 +47,11 @@ async function runScreenshot(inputExcelPath, outputDir) {
   const result = [];
   const failed = [];
 
+  // 定义选择器（你可以根据实际页面调整）
+  const parentSelector = "body > div.page.detail.js-page > div.main";
+  const topBoundarySelector =
+    "body > div.page.detail.js-page > div.main > div.detail-cover.js-detail-cover.swiper-container.swiper-container-horizontal";
+
   for (let i = 0; i < rows.length; i++) {
     const item = rows[i];
     const url = item["链接"];
@@ -53,9 +62,10 @@ async function runScreenshot(inputExcelPath, outputDir) {
     console.log("链接:", url);
 
     try {
+      // 1. 加载页面
       await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
 
-      // 关闭弹窗
+      // 2. 关闭弹窗
       const closeSelectors = [
         ".close",
         ".login-popup .close",
@@ -75,7 +85,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
       await page.keyboard.press("Escape");
       await page.waitForTimeout(1000);
 
-      const parentSelector = "body > div.page.detail.js-page > div.main";
+      // 3. 等待父容器和顶部元素出现
       await page.waitForSelector(parentSelector, {
         state: "visible",
         timeout: 10000,
@@ -85,69 +95,81 @@ async function runScreenshot(inputExcelPath, outputDir) {
         .catch(() => {});
       await page.waitForTimeout(2000);
 
-      // ================= 彻底隐藏底部干扰元素 =================
-      await page.evaluate(() => {
-        // 1. 通过文本查找并隐藏
-        const unwantedTexts = ["今日热门推荐", "打开app查看更多精彩内容"];
-        const all = document.querySelectorAll("*");
-        const toHide = new Set();
+      // 4. 计算裁剪区域：从 topBoundary 顶部 到 包含"打开app"文本的元素的底部
+      const clipRect = await page.evaluate(
+        ({ parentSel, topSel, bottomText }) => {
+          const parent = document.querySelector(parentSel);
+          const topEl = document.querySelector(topSel);
+          if (!parent || !topEl) return null;
 
-        for (const el of all) {
-          const text = el.textContent.trim();
-          for (const unwanted of unwantedTexts) {
-            if (text === unwanted || text.includes(unwanted)) {
-              // 向上找到最近的容器类（Widget 或 footer）
-              let parent = el;
-              while (parent && parent !== document.body) {
-                if (
-                  parent.classList &&
-                  (parent.classList.contains("Widget") ||
-                    parent.classList.contains("footer"))
-                ) {
-                  toHide.add(parent);
-                  break;
-                }
-                parent = parent.parentElement;
-              }
-              toHide.add(el);
+          // 查找包含 "打开app" 文本的元素（取第一个匹配的，且可见）
+          const all = document.querySelectorAll("*");
+          let bottomEl = null;
+          for (const el of all) {
+            const text = el.textContent.trim();
+            if (text.includes(bottomText)) {
+              // 如果该元素有子元素，取最内层的容器（通常是最小文本节点）
+              // 但这里直接取找到的第一个，然后用它的底部作为边界
+              bottomEl = el;
               break;
             }
           }
-        }
 
-        // 2. 通过已知类名隐藏
-        const classSelectors = [
-          "div.Widget.other-content",
-          "div.Widget.footer.js-footer",
-          "div.detail-footer",
-        ];
-        for (const sel of classSelectors) {
-          const el = document.querySelector(sel);
-          if (el) toHide.add(el);
-        }
+          // 如果文本找不到，降级为使用类名 .Widget.footer
+          if (!bottomEl) {
+            bottomEl = document.querySelector("div.Widget.footer.js-footer");
+          }
 
-        // 3. 全部隐藏
-        for (const el of toHide) {
-          if (el) el.style.display = "none";
-        }
+          if (!bottomEl) {
+            // 如果依然找不到，则截取整个父容器
+            return null;
+          }
 
-        // 4. 移除父容器底部额外间距
-        const main = document.querySelector(
-          "body > div.page.detail.js-page > div.main",
-        );
-        if (main) {
-          main.style.paddingBottom = "0";
-          main.style.marginBottom = "0";
-        }
-      });
+          const parentRect = parent.getBoundingClientRect();
+          const topRect = topEl.getBoundingClientRect();
+          const bottomRect = bottomEl.getBoundingClientRect();
 
-      // ================= 直接截图父容器 =================
-      const parentElement = page.locator(parentSelector).first();
+          const parentDocX = parentRect.left + window.scrollX;
+          const topY = topRect.top + window.scrollY;
+          // 底部终点 = bottomEl 底部 + 20 像素余量（保证包含所有内容）
+          const bottomY = bottomRect.bottom + window.scrollY + 20;
+
+          const height = bottomY - topY;
+          if (height <= 0) return null;
+
+          return {
+            x: parentDocX,
+            y: topY,
+            width: parentRect.width,
+            height: height,
+          };
+        },
+        {
+          parentSel: parentSelector,
+          topSel: topBoundarySelector,
+          bottomText: "打开app查看更多精彩内容",
+        },
+      );
+
+      if (!clipRect || clipRect.width <= 0 || clipRect.height <= 0) {
+        throw new Error("裁剪区域无效，可能未找到顶部或底部元素");
+      }
+
+      const finalClip = {
+        x: Math.round(clipRect.x),
+        y: Math.round(clipRect.y),
+        width: Math.round(clipRect.width),
+        height: Math.round(clipRect.height),
+      };
+      console.log("裁剪区域（文档坐标）:", finalClip);
+
+      // 5. 截图
       const filename = `${String(i + 1).padStart(3, "0")}_${author}.png`;
-      await parentElement.screenshot({
+      await page.screenshot({
         path: path.join(screenshotDir, filename),
+        clip: finalClip,
+        fullPage: true,
       });
-
       console.log("截图完成:", filename);
 
       result.push({
@@ -232,6 +254,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
   await resultWorkbook.xlsx.writeFile(resultExcelPath);
   console.log(`✅ 已生成结果 Excel：${resultExcelPath}`);
 
+  // ---------- 失败记录 ----------
   let failedExcelPath = null;
   if (failed.length > 0) {
     failedExcelPath = path.join(outputDir, `failed_${Date.now()}.xlsx`);

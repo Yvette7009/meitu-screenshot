@@ -1,8 +1,4 @@
 // screenshot.js
-const Jimp = require("jimp");
-// 如果安装的是新版，可能需要：
-// const Jimp = require('jimp').default;
-// 如果报错，请用: const { Jimp } = require('jimp');
 const { chromium } = require("playwright");
 const ExcelJS = require("exceljs");
 const XLSX = require("xlsx");
@@ -56,6 +52,10 @@ async function runScreenshot(inputExcelPath, outputDir) {
   const topBoundarySelector =
     "body > div.page.detail.js-page > div.main > div.detail-cover.js-detail-cover.swiper-container.swiper-container-horizontal";
 
+  // ===== 可调整参数 =====
+  const BOTTOM_CROP = 138; // 想要裁掉的底部像素数，可调整
+  // =====================
+
   for (let i = 0; i < rows.length; i++) {
     const item = rows[i];
     const url = item["链接"];
@@ -99,21 +99,19 @@ async function runScreenshot(inputExcelPath, outputDir) {
         .catch(() => {});
       await page.waitForTimeout(2000);
 
-      // 4. 计算裁剪区域：从 topBoundary 顶部 到 包含"打开app"文本的元素的底部
+      // 4. 计算裁剪区域：从 topBoundary 顶部 到 包含"打开app"文本的元素的底部，再减去 BOTTOM_CROP
       const clipRect = await page.evaluate(
-        ({ parentSel, topSel, bottomText }) => {
+        ({ parentSel, topSel, bottomText, bottomCrop }) => {
           const parent = document.querySelector(parentSel);
           const topEl = document.querySelector(topSel);
           if (!parent || !topEl) return null;
 
-          // 查找包含 "打开app" 文本的元素（取第一个匹配的，且可见）
+          // 查找包含 "打开app" 文本的元素
           const all = document.querySelectorAll("*");
           let bottomEl = null;
           for (const el of all) {
             const text = el.textContent.trim();
             if (text.includes(bottomText)) {
-              // 如果该元素有子元素，取最内层的容器（通常是最小文本节点）
-              // 但这里直接取找到的第一个，然后用它的底部作为边界
               bottomEl = el;
               break;
             }
@@ -125,7 +123,6 @@ async function runScreenshot(inputExcelPath, outputDir) {
           }
 
           if (!bottomEl) {
-            // 如果依然找不到，则截取整个父容器
             return null;
           }
 
@@ -135,10 +132,11 @@ async function runScreenshot(inputExcelPath, outputDir) {
 
           const parentDocX = parentRect.left + window.scrollX;
           const topY = topRect.top + window.scrollY;
-          // 底部终点 = bottomEl 底部 + 20 像素余量（保证包含所有内容）
+          // 底部终点 = bottomEl 底部 + 20 像素余量
           const bottomY = bottomRect.bottom + window.scrollY + 20;
 
-          const height = bottomY - topY;
+          // 关键：减去 BOTTOM_CROP，直接裁掉底部多余部分
+          let height = bottomY - topY - bottomCrop;
           if (height <= 0) return null;
 
           return {
@@ -152,6 +150,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
           parentSel: parentSelector,
           topSel: topBoundarySelector,
           bottomText: "打开app查看更多精彩内容>",
+          bottomCrop: BOTTOM_CROP, // ← 传入偏移量
         },
       );
 
@@ -167,32 +166,13 @@ async function runScreenshot(inputExcelPath, outputDir) {
       };
       console.log("裁剪区域（文档坐标）:", finalClip);
 
-      // 5. 截图
+      // 5. 截图（直接保存，无中间步骤）
       const filename = `${String(i + 1).padStart(3, "0")}_${author}.png`;
-      const tempPath = path.join(screenshotDir, `temp_${filename}`);
-
-      // 截图到临时文件
       await page.screenshot({
-        path: tempPath,
+        path: path.join(screenshotDir, filename),
         clip: finalClip,
         fullPage: true,
       });
-
-      // 裁剪底部固定像素
-      const BOTTOM_CROP = 138; // 可调整
-      const image = await Jimp.read(tempPath);
-      const { width, height } = image.bitmap;
-      const newHeight = height - BOTTOM_CROP;
-      if (newHeight > 0) {
-        await image
-          .crop(0, 0, width, newHeight)
-          .writeAsync(path.join(screenshotDir, filename));
-      } else {
-        // 如果裁剪后高度为0，直接保存原图
-        await fs.copy(tempPath, path.join(screenshotDir, filename));
-      }
-      // 删除临时文件
-      await fs.remove(tempPath);
 
       console.log("截图完成:", filename);
 
@@ -218,7 +198,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
 
   await browser.close();
 
-  // ---------- 生成结果 Excel ----------
+  // ---------- 生成结果 Excel（与之前完全相同） ----------
   const resultExcelPath = path.join(outputDir, `result_${Date.now()}.xlsx`);
   const resultWorkbook = new ExcelJS.Workbook();
   const resultSheet = resultWorkbook.addWorksheet("截图结果");

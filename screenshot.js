@@ -6,6 +6,7 @@ const fs = require("fs-extra");
 const path = require("path");
 const sizeOf = require("image-size");
 
+// 安全命名
 function safeName(name) {
   return String(name)
     .replace(/[\\/:*?"<>|]/g, "")
@@ -43,10 +44,11 @@ async function runScreenshot(inputExcelPath, outputDir) {
   const result = [];
   const failed = [];
 
-  // ===== 固定选择器和裁剪常量 =====
+  // ========== 配置 ==========
   const parentSelector = "body > div.page.detail.js-page > div.main";
-  const TOP_CROP = 0; // 顶部裁掉 0 像素
-  const BOTTOM_CROP = 110; // 底部裁掉 110 像素
+  const TOP_CROP = 110; // 顶部裁掉 110px（可根据需要调整）
+  // 底部不再固定裁剪，而是动态定位到互动区 inputBox
+  // =========================
 
   for (let i = 0; i < rows.length; i++) {
     const item = rows[i];
@@ -58,9 +60,10 @@ async function runScreenshot(inputExcelPath, outputDir) {
     console.log("链接:", url);
 
     try {
+      // 1. 加载页面，等待所有资源完成
       await page.goto(url, { waitUntil: "networkidle0", timeout: 60000 });
 
-      // 关闭弹窗
+      // 2. 关闭弹窗（保持不变）
       const closeSelectors = [
         ".close",
         ".login-popup .close",
@@ -80,20 +83,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
       await page.keyboard.press("Escape");
       await page.waitForTimeout(1000);
 
-      // ===== 页面加载后，强制触发懒加载 =====
-      // 1. 滚动到底部
-      await page.evaluate(() => {
-        window.scrollTo(0, document.body.scrollHeight);
-      });
-      await page.waitForTimeout(3000); // 等待内容加载
-
-      // 2. 滚动到顶部（方便后续截图）
-      await page.evaluate(() => {
-        window.scrollTo(0, 0);
-      });
-      await page.waitForTimeout(500);
-
-      // 等待父容器可见
+      // 3. 等待父容器可见
       await page.waitForSelector(parentSelector, {
         state: "visible",
         timeout: 10000,
@@ -101,38 +91,75 @@ async function runScreenshot(inputExcelPath, outputDir) {
       await page
         .waitForLoadState("networkidle0", { timeout: 10000 })
         .catch(() => {});
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(2000);
 
-      // ===== 1. 隐藏底部不需要的元素 =====
+      // 4. 滚动到页面底部，触发懒加载（确保互动区加载）
       await page.evaluate(() => {
-        // 隐藏“今日热门推荐”
+        window.scrollTo(0, document.body.scrollHeight);
+      });
+      await page.waitForTimeout(1500);
+
+      // 5. 隐藏底部不需要的元素（今日热门推荐、打开app等）
+      await page.evaluate(() => {
         const hot = document.querySelector("div.Widget.hot.js-widget-hot");
         if (hot) hot.style.display = "none";
-
-        // 隐藏“打开app查看更多精彩内容”
         const footer = document.querySelector("div.Widget.footer.js-footer");
         if (footer) footer.style.display = "none";
       });
 
-      // ===== 2. 计算裁剪区域 =====
+      // 6. 强制重绘（确保样式应用）
+      await page.evaluate(() => {
+        document.body.style.display = "none";
+        document.body.offsetHeight;
+        document.body.style.display = "";
+      });
+
+      // 7. 计算裁剪区域：顶部固定，底部动态定位到互动区 inputBox
       const clipRect = await page.evaluate(
-        ({ parentSel, topCrop, bottomCrop }) => {
+        ({ parentSel, topCrop }) => {
           const parent = document.querySelector(parentSel);
           if (!parent) return null;
 
-          const rect = parent.getBoundingClientRect();
-          const x = rect.left + window.scrollX;
-          const y = rect.top + window.scrollY + topCrop;
-          const width = rect.width;
-          const height = rect.height - topCrop - bottomCrop;
+          const parentRect = parent.getBoundingClientRect();
+          const parentDocX = parentRect.left + window.scrollX;
+          const parentDocY = parentRect.top + window.scrollY;
 
-          if (height <= 0) return null;
-          return { x, y, width, height };
+          const topY = parentDocY + topCrop;
+
+          // 寻找互动区容器
+          let bottomY = parentRect.bottom + window.scrollY;
+          const inputBox = document.querySelector(
+            "div.inputBox.js-default.js-input-box",
+          );
+          if (inputBox) {
+            const inputRect = inputBox.getBoundingClientRect();
+            bottomY = inputRect.bottom + window.scrollY + 20; // 加 20px 余量
+            console.log("✅ 找到互动区 inputBox，底部位置:", bottomY);
+          } else {
+            console.warn("⚠️ 未找到互动区 inputBox，使用父容器底部");
+          }
+
+          const height = bottomY - topY;
+          if (height <= 0) {
+            // 降级：使用父容器高度减去顶部偏移
+            return {
+              x: parentDocX,
+              y: topY,
+              width: parentRect.width,
+              height: parentRect.height - topCrop,
+            };
+          }
+
+          return {
+            x: parentDocX,
+            y: topY,
+            width: parentRect.width,
+            height: height,
+          };
         },
         {
           parentSel: parentSelector,
           topCrop: TOP_CROP,
-          bottomCrop: BOTTOM_CROP,
         },
       );
 
@@ -148,11 +175,12 @@ async function runScreenshot(inputExcelPath, outputDir) {
       };
       console.log("裁剪区域（文档坐标）:", finalClip);
 
+      // 8. 截图
       const filename = `${String(i + 1).padStart(3, "0")}_${author}.png`;
       await page.screenshot({
         path: path.join(screenshotDir, filename),
         clip: finalClip,
-        fullPage: true, // 保留，确保 Excel 缩略图完整
+        fullPage: true, // 确保与 clip 配合正确
       });
       console.log("截图完成:", filename);
 

@@ -1,6 +1,6 @@
 // server.js
 const express = require("express");
-const fileUpload = require("express-fileupload");
+const multer = require("multer");
 const fs = require("fs-extra");
 const path = require("path");
 const { runScreenshot } = require("./screenshot");
@@ -10,71 +10,46 @@ console.log("🚀 正在启动服务器...");
 const app = express();
 const CLEANUP_DAYS = 5;
 
-// ===== 使用 express-fileupload 中间件 =====
-app.use(
-  fileUpload({
-    limits: { fileSize: 50 * 1024 * 1024 },
-    abortOnLimit: true,
-    responseOnLimit: "文件太大，请上传小于 50MB 的 Excel",
-    useTempFiles: true,
-    tempFileDir: "/tmp/",
-  }),
-);
+// ===== 1. 配置 Multer =====
+const upload = multer({
+  dest: "uploads/",
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB
+  },
+});
 
+// ===== 2. 调试中间件：打印请求头 =====
+app.use((req, res, next) => {
+  if (req.path === "/upload") {
+    console.log("📋 请求方法:", req.method);
+    console.log("📋 Content-Type:", req.headers["content-type"]);
+  }
+  next();
+});
+
+// ===== 3. 静态文件 =====
 app.use(express.static("public"));
 
-// ===== 清理旧目录函数 =====
-async function cleanupOldOutputs() {
-  const outputRoot = path.join(__dirname, "output");
-  if (!fs.existsSync(outputRoot)) return;
-  const now = Date.now();
-  const dirs = fs.readdirSync(outputRoot, { withFileTypes: true });
-  for (const dir of dirs) {
-    if (dir.isDirectory()) {
-      const dirPath = path.join(outputRoot, dir.name);
-      const stat = fs.statSync(dirPath);
-      const ageDays = (now - stat.mtime.getTime()) / (1000 * 60 * 60 * 24);
-      if (ageDays > CLEANUP_DAYS) {
-        await fs.remove(dirPath);
-        console.log(`🧹 清理旧目录: ${dir.name}`);
-      }
-    }
-  }
-}
-
-// ===== 上传路由 =====
-app.post("/upload", async (req, res) => {
+// ===== 4. 上传路由 =====
+app.post("/upload", upload.single("excel"), async (req, res) => {
   console.log("📥 收到上传请求");
-  console.log("req.files:", req.files);
+  console.log("req.file:", req.file);
   console.log("req.body:", req.body);
 
   try {
-    if (!req.files || !req.files.excel) {
+    // 检查文件是否存在
+    if (!req.file) {
       return res.status(400).json({
-        error: "请上传 Excel 文件（字段名必须为 'excel'）",
-        debug: { files: req.files, body: req.body },
+        error:
+          "没有收到文件，请确保表单字段名为 'excel'，且 Content-Type 为 multipart/form-data",
+        debug: {
+          headers: req.headers,
+          body: req.body,
+        },
       });
     }
 
-    const excelFile = req.files.excel;
-    const ext = path.extname(excelFile.name).toLowerCase();
-    if (![".xlsx", ".xls"].includes(ext)) {
-      return res.status(400).json({ error: "只支持 .xlsx 或 .xls 文件" });
-    }
-
-    const tempDir = path.join(__dirname, "uploads");
-    await fs.ensureDir(tempDir);
-    const inputPath = path.join(tempDir, `${Date.now()}_${excelFile.name}`);
-
-    // 使用 Promise 包装 mv 回调
-    await new Promise((resolve, reject) => {
-      excelFile.mv(inputPath, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-    console.log("✅ 文件保存成功:", inputPath);
-
+    const inputPath = req.file.path;
     const outputDir = path.join(__dirname, "output", Date.now().toString());
     await fs.ensureDir(outputDir);
 
@@ -82,6 +57,8 @@ app.post("/upload", async (req, res) => {
     const result = await runScreenshot(inputPath, outputDir);
 
     await fs.remove(inputPath);
+
+    // 异步清理旧目录
     cleanupOldOutputs().catch((err) => console.warn("清理旧目录时出错:", err));
 
     res.json({
@@ -101,7 +78,7 @@ app.post("/upload", async (req, res) => {
   }
 });
 
-// ===== 下载路由 =====
+// ===== 5. 下载路由（不变） =====
 app.get("/download/:filename", (req, res) => {
   const filename = req.params.filename;
   const outputRoot = path.join(__dirname, "output");
@@ -127,13 +104,32 @@ app.get("/download/:filename", (req, res) => {
   res.status(404).send("文件不存在");
 });
 
-// ===== 超时设置 =====
+// ===== 6. 清理函数 =====
+async function cleanupOldOutputs() {
+  const outputRoot = path.join(__dirname, "output");
+  if (!fs.existsSync(outputRoot)) return;
+  const now = Date.now();
+  const dirs = fs.readdirSync(outputRoot, { withFileTypes: true });
+  for (const dir of dirs) {
+    if (dir.isDirectory()) {
+      const dirPath = path.join(outputRoot, dir.name);
+      const stat = fs.statSync(dirPath);
+      const ageDays = (now - stat.mtime.getTime()) / (1000 * 60 * 60 * 24);
+      if (ageDays > CLEANUP_DAYS) {
+        await fs.remove(dirPath);
+        console.log(`🧹 清理旧目录: ${dir.name}`);
+      }
+    }
+  }
+}
+
+// ===== 7. 超时设置 =====
 app.use((req, res, next) => {
   req.setTimeout(600000);
   next();
 });
 
-// ===== 启动 =====
+// ===== 8. 启动 =====
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ 服务器已启动，监听端口 ${PORT}`);

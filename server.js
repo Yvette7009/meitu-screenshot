@@ -1,6 +1,6 @@
 // server.js
 const express = require("express");
-const fileUpload = require("express-fileupload"); // ← 替换 multer
+const fileUpload = require("express-fileupload");
 const fs = require("fs-extra");
 const path = require("path");
 const { runScreenshot } = require("./screenshot");
@@ -10,26 +10,21 @@ console.log("🚀 正在启动服务器...");
 const app = express();
 const CLEANUP_DAYS = 5;
 
-// ===== 文件上传配置（使用 express-fileupload） =====
 app.use(
   fileUpload({
-    limits: {
-      fileSize: 50 * 1024 * 1024, // 50MB
-    },
-    abortOnLimit: true, // 超出限制直接返回错误
+    limits: { fileSize: 50 * 1024 * 1024 },
+    abortOnLimit: true,
     responseOnLimit: "文件太大，请上传小于 50MB 的 Excel",
-    // 可选：临时文件路径（默认会使用内存，小文件没问题）
-    useTempFiles: false,
+    useTempFiles: true,
+    tempFileDir: "/tmp/",
   }),
 );
 
 app.use(express.static("public"));
 
-// 清理旧目录函数（保持不变）
 async function cleanupOldOutputs() {
   const outputRoot = path.join(__dirname, "output");
   if (!fs.existsSync(outputRoot)) return;
-
   const now = Date.now();
   const dirs = fs.readdirSync(outputRoot, { withFileTypes: true });
   for (const dir of dirs) {
@@ -45,30 +40,39 @@ async function cleanupOldOutputs() {
   }
 }
 
-// ===== 上传路由（使用 express-fileupload） =====
 app.post("/upload", async (req, res) => {
   console.log("📥 收到上传请求");
+
+  // 🔍 调试：打印接收到的文件信息
+  console.log("req.files:", req.files);
+  console.log("req.body:", req.body);
+
   try {
-    // 检查是否有文件
     if (!req.files || !req.files.excel) {
-      return res.status(400).json({ error: "请上传 Excel 文件" });
+      return res.status(400).json({
+        error: "请上传 Excel 文件（字段名必须为 'excel'）",
+        debug: { files: req.files, body: req.body },
+      });
     }
 
-    const file = req.files.excel;
-    // 检查文件类型（可选）
-    const ext = path.extname(file.name).toLowerCase();
+    const excelFile = req.files.excel;
+    const ext = path.extname(excelFile.name).toLowerCase();
     if (![".xlsx", ".xls"].includes(ext)) {
-      return res.status(400).json({ error: "仅支持 .xlsx 或 .xls 格式" });
+      return res.status(400).json({ error: "只支持 .xlsx 或 .xls 文件" });
     }
 
-    // 将文件保存到临时目录
-    const inputPath = path.join(
-      __dirname,
-      "uploads",
-      `${Date.now()}_${file.name}`,
-    );
-    await fs.ensureDir(path.dirname(inputPath));
-    await file.mv(inputPath);
+    const tempDir = path.join(__dirname, "uploads");
+    await fs.ensureDir(tempDir);
+    const inputPath = path.join(tempDir, `${Date.now()}_${excelFile.name}`);
+
+    // 使用 Promise 包装 mv 回调
+    await new Promise((resolve, reject) => {
+      excelFile.mv(inputPath, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    console.log("✅ 文件保存成功:", inputPath);
 
     const outputDir = path.join(__dirname, "output", Date.now().toString());
     await fs.ensureDir(outputDir);
@@ -76,10 +80,7 @@ app.post("/upload", async (req, res) => {
     console.log("📸 开始执行截图...");
     const result = await runScreenshot(inputPath, outputDir);
 
-    // 删除临时文件
     await fs.remove(inputPath);
-
-    // 异步清理旧目录
     cleanupOldOutputs().catch((err) => console.warn("清理旧目录时出错:", err));
 
     res.json({
@@ -99,14 +100,12 @@ app.post("/upload", async (req, res) => {
   }
 });
 
-// ===== 下载路由（保持不变） =====
 app.get("/download/:filename", (req, res) => {
   const filename = req.params.filename;
   const outputRoot = path.join(__dirname, "output");
   if (!fs.existsSync(outputRoot)) {
     return res.status(404).send("文件不存在");
   }
-
   const dirs = fs
     .readdirSync(outputRoot, { withFileTypes: true })
     .filter((d) => d.isDirectory())
@@ -123,17 +122,14 @@ app.get("/download/:filename", (req, res) => {
       return res.download(filePath);
     }
   }
-
   res.status(404).send("文件不存在");
 });
 
-// ===== 超时设置（保持不变） =====
 app.use((req, res, next) => {
-  req.setTimeout(600000); // 10 分钟
+  req.setTimeout(600000);
   next();
 });
 
-// ===== 启动 =====
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ 服务器已启动，监听端口 ${PORT}`);

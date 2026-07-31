@@ -46,7 +46,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
 
   // ========== 配置 ==========
   const parentSelector = "body > div.page.detail.js-page > div.main";
-  const TOP_CROP = 10; // 顶部裁掉 10px（可根据需要调整）
+  const TOP_CROP = 0; // 顶部裁掉 0px（可根据需要调整）
   // 底部不再固定裁剪，而是动态定位到互动区 inputBox
   // =========================
 
@@ -82,6 +82,25 @@ async function runScreenshot(inputExcelPath, outputDir) {
       }
       await page.keyboard.press("Escape");
       await page.waitForTimeout(1000);
+
+      // ===== 自动展开全部文案 =====
+      try {
+        const containerSelector =
+          "body > div.page.detail.js-page > div.main > div.detail-footer > div.description.js-description > div";
+        const expandBtn = page.locator(containerSelector + " >> text=展开全部");
+        if ((await expandBtn.count()) > 0) {
+          await expandBtn.click();
+          console.log("✅ 已点击展开全部");
+          await page.waitForTimeout(1000);
+          await page
+            .waitForLoadState("networkidle0", { timeout: 5000 })
+            .catch(() => {});
+        } else {
+          console.log("ℹ️ 未找到展开按钮，无需展开");
+        }
+      } catch (err) {
+        console.warn("展开操作出错:", err.message);
+      }
 
       // 3. 等待父容器可见
       await page.waitForSelector(parentSelector, {

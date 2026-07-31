@@ -6,7 +6,6 @@ const fs = require("fs-extra");
 const path = require("path");
 const sizeOf = require("image-size");
 
-// 安全命名函数
 function safeName(name) {
   return String(name)
     .replace(/[\\/:*?"<>|]/g, "")
@@ -14,9 +13,6 @@ function safeName(name) {
     .slice(0, 40);
 }
 
-/**
- * 执行批量截图
- */
 async function runScreenshot(inputExcelPath, outputDir) {
   await fs.ensureDir(outputDir);
   const screenshotDir = path.join(outputDir, "screenshots");
@@ -47,14 +43,10 @@ async function runScreenshot(inputExcelPath, outputDir) {
   const result = [];
   const failed = [];
 
-  // 定义选择器（你可以根据实际页面调整）
+  // ===== 固定选择器和裁剪常量 =====
   const parentSelector = "body > div.page.detail.js-page > div.main";
-  const topBoundarySelector =
-    "body > div.page.detail.js-page > div.main > div.detail-cover.js-detail-cover.swiper-container.swiper-container-horizontal";
-
-  // ===== 可调整参数 =====
-  const BOTTOM_CROP = 155; // 想要裁掉的底部像素数，可调整
-  // =====================
+  const TOP_CROP = 0; // 顶部裁掉 0 像素
+  const BOTTOM_CROP = 110; // 底部裁掉 110 像素
 
   for (let i = 0; i < rows.length; i++) {
     const item = rows[i];
@@ -66,10 +58,9 @@ async function runScreenshot(inputExcelPath, outputDir) {
     console.log("链接:", url);
 
     try {
-      // 1. 加载页面
       await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
 
-      // 2. 关闭弹窗
+      // 关闭弹窗
       const closeSelectors = [
         ".close",
         ".login-popup .close",
@@ -89,7 +80,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
       await page.keyboard.press("Escape");
       await page.waitForTimeout(1000);
 
-      // 3. 等待父容器和顶部元素出现
+      // 等待父容器可见
       await page.waitForSelector(parentSelector, {
         state: "visible",
         timeout: 10000,
@@ -99,63 +90,41 @@ async function runScreenshot(inputExcelPath, outputDir) {
         .catch(() => {});
       await page.waitForTimeout(2000);
 
-      // 4. 计算裁剪区域：从 topBoundary 顶部 到 包含"打开app"文本的元素的底部，再减去 BOTTOM_CROP
+      // ===== 1. 隐藏底部不需要的元素 =====
+      await page.evaluate(() => {
+        // 隐藏“今日热门推荐”
+        const hot = document.querySelector("div.Widget.hot.js-widget-hot");
+        if (hot) hot.style.display = "none";
+
+        // 隐藏“打开app查看更多精彩内容”
+        const footer = document.querySelector("div.Widget.footer.js-footer");
+        if (footer) footer.style.display = "none";
+      });
+
+      // ===== 2. 计算裁剪区域 =====
       const clipRect = await page.evaluate(
-        ({ parentSel, topSel, bottomText, bottomCrop }) => {
+        ({ parentSel, topCrop, bottomCrop }) => {
           const parent = document.querySelector(parentSel);
-          const topEl = document.querySelector(topSel);
-          if (!parent || !topEl) return null;
+          if (!parent) return null;
 
-          // 查找包含 "打开app" 文本的元素
-          const all = document.querySelectorAll("*");
-          let bottomEl = null;
-          for (const el of all) {
-            const text = el.textContent.trim();
-            if (text.includes(bottomText)) {
-              bottomEl = el;
-              break;
-            }
-          }
+          const rect = parent.getBoundingClientRect();
+          const x = rect.left + window.scrollX;
+          const y = rect.top + window.scrollY + topCrop;
+          const width = rect.width;
+          const height = rect.height - topCrop - bottomCrop;
 
-          // 如果文本找不到，降级为使用类名 .Widget.footer
-          if (!bottomEl) {
-            bottomEl = document.querySelector("div.Widget.footer.js-footer");
-          }
-
-          if (!bottomEl) {
-            return null;
-          }
-
-          const parentRect = parent.getBoundingClientRect();
-          const topRect = topEl.getBoundingClientRect();
-          const bottomRect = bottomEl.getBoundingClientRect();
-
-          const parentDocX = parentRect.left + window.scrollX;
-          const topY = topRect.top + window.scrollY;
-          // 底部终点 = bottomEl 底部 + 20 像素余量
-          const bottomY = bottomRect.bottom + window.scrollY + 20;
-
-          // 关键：减去 BOTTOM_CROP，直接裁掉底部多余部分
-          let height = bottomY - topY - bottomCrop;
           if (height <= 0) return null;
-
-          return {
-            x: parentDocX,
-            y: topY,
-            width: parentRect.width,
-            height: height,
-          };
+          return { x, y, width, height };
         },
         {
           parentSel: parentSelector,
-          topSel: topBoundarySelector,
-          bottomText: "打开app查看更多精彩内容>",
-          bottomCrop: BOTTOM_CROP, // ← 传入偏移量
+          topCrop: TOP_CROP,
+          bottomCrop: BOTTOM_CROP,
         },
       );
 
       if (!clipRect || clipRect.width <= 0 || clipRect.height <= 0) {
-        throw new Error("裁剪区域无效，可能未找到顶部或底部元素");
+        throw new Error("裁剪区域无效");
       }
 
       const finalClip = {
@@ -166,14 +135,12 @@ async function runScreenshot(inputExcelPath, outputDir) {
       };
       console.log("裁剪区域（文档坐标）:", finalClip);
 
-      // 5. 截图（直接保存，无中间步骤）
       const filename = `${String(i + 1).padStart(3, "0")}_${author}.png`;
       await page.screenshot({
         path: path.join(screenshotDir, filename),
         clip: finalClip,
-        fullPage: true,
+        fullPage: true, // 保留，确保 Excel 缩略图完整
       });
-
       console.log("截图完成:", filename);
 
       result.push({
@@ -198,7 +165,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
 
   await browser.close();
 
-  // ---------- 生成结果 Excel（与之前完全相同） ----------
+  // ---------- 生成结果 Excel ----------
   const resultExcelPath = path.join(outputDir, `result_${Date.now()}.xlsx`);
   const resultWorkbook = new ExcelJS.Workbook();
   const resultSheet = resultWorkbook.addWorksheet("截图结果");

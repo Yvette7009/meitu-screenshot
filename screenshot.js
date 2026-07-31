@@ -46,7 +46,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
 
   // ========== 配置 ==========
   const parentSelector = "body > div.page.detail.js-page > div.main";
-  const TOP_CROP = 110; // 顶部裁掉 110px（可根据需要调整）
+  const TOP_CROP = 10; // 顶部裁掉 10px（可根据需要调整）
   // 底部不再固定裁剪，而是动态定位到互动区 inputBox
   // =========================
 

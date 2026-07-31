@@ -80,13 +80,26 @@ async function runScreenshot(inputExcelPath, outputDir) {
       await page.keyboard.press("Escape");
       await page.waitForTimeout(1000);
 
+      // ===== 页面加载后，强制触发懒加载 =====
+      // 1. 滚动到底部
+      await page.evaluate(() => {
+        window.scrollTo(0, document.body.scrollHeight);
+      });
+      await page.waitForTimeout(3000); // 等待内容加载
+
+      // 2. 滚动到顶部（方便后续截图）
+      await page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+      await page.waitForTimeout(500);
+
       // 等待父容器可见
       await page.waitForSelector(parentSelector, {
         state: "visible",
         timeout: 10000,
       });
       await page
-        .waitForLoadState("networkidle", { timeout: 10000 })
+        .waitForLoadState("networkidle0", { timeout: 10000 })
         .catch(() => {});
       await page.waitForTimeout(3000);
 

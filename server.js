@@ -1,4 +1,3 @@
-// server.js
 const express = require("express");
 const multer = require("multer");
 const fs = require("fs-extra");
@@ -8,80 +7,26 @@ const { runScreenshot } = require("./screenshot");
 console.log("🚀 正在启动服务器...");
 
 const app = express();
-const CLEANUP_DAYS = 5;
-
-// ===== 文件上传配置（增加 fieldSize 限制） =====
-const upload = multer({
-  dest: "uploads/",
-  limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB
-    fieldSize: 20 * 1024 * 1024, // 20MB (防止表单字段过大)
-  },
-});
+const upload = multer({ dest: "uploads/" });
 
 app.use(express.static("public"));
 
-// 清理旧目录函数（保持不变）
-async function cleanupOldOutputs() {
-  const outputRoot = path.join(__dirname, "output");
-  if (!fs.existsSync(outputRoot)) return;
-
-  const now = Date.now();
-  const dirs = fs.readdirSync(outputRoot, { withFileTypes: true });
-  for (const dir of dirs) {
-    if (dir.isDirectory()) {
-      const dirPath = path.join(outputRoot, dir.name);
-      const stat = fs.statSync(dirPath);
-      const ageDays = (now - stat.mtime.getTime()) / (1000 * 60 * 60 * 24);
-      if (ageDays > CLEANUP_DAYS) {
-        await fs.remove(dirPath);
-        console.log(`🧹 清理旧目录: ${dir.name}`);
-      }
-    }
-  }
-}
-
-// ===== 上传路由（增加错误捕获） =====
+// 上传路由（简化）
 app.post("/upload", (req, res) => {
   upload.single("excel")(req, res, async (err) => {
-    // 处理 Multer 错误
     if (err) {
       console.error("上传错误:", err);
-      if (err instanceof multer.MulterError) {
-        if (err.code === "LIMIT_FILE_SIZE") {
-          return res
-            .status(400)
-            .json({ error: "文件太大，请上传小于 50MB 的 Excel" });
-        }
-        return res.status(400).json({ error: `上传错误: ${err.message}` });
-      } else {
-        // 包括 Unexpected end of form 等
-        return res
-          .status(500)
-          .json({ error: "上传中断，请检查网络或文件大小，重试" });
-      }
+      return res.status(400).json({ error: "上传失败: " + err.message });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: "没有文件" });
     }
 
-    // 原处理逻辑（保持不变）
-    console.log("📥 收到上传请求");
     try {
-      if (!req.file) {
-        return res.status(400).json({ error: "请上传 Excel 文件" });
-      }
-
-      const inputPath = req.file.path;
       const outputDir = path.join(__dirname, "output", Date.now().toString());
       await fs.ensureDir(outputDir);
-
-      console.log("📸 开始执行截图...");
-      const result = await runScreenshot(inputPath, outputDir);
-
-      await fs.remove(inputPath);
-
-      // 异步清理旧目录（不阻塞响应）
-      cleanupOldOutputs().catch((err) =>
-        console.warn("清理旧目录时出错:", err),
-      );
+      const result = await runScreenshot(req.file.path, outputDir);
+      await fs.remove(req.file.path);
 
       res.json({
         success: true,
@@ -93,22 +38,17 @@ app.post("/upload", (req, res) => {
         successCount: result.success,
         failedCount: result.failed,
       });
-      console.log("✅ 处理完成，已返回结果");
     } catch (error) {
-      console.error("❌ 处理出错:", error);
+      console.error("处理出错:", error);
       res.status(500).json({ error: error.message });
     }
   });
 });
 
-// ===== 下载路由（保持不变） =====
 app.get("/download/:filename", (req, res) => {
   const filename = req.params.filename;
   const outputRoot = path.join(__dirname, "output");
-  if (!fs.existsSync(outputRoot)) {
-    return res.status(404).send("文件不存在");
-  }
-
+  if (!fs.existsSync(outputRoot)) return res.status(404).send("未找到");
   const dirs = fs
     .readdirSync(outputRoot, { withFileTypes: true })
     .filter((d) => d.isDirectory())
@@ -118,26 +58,12 @@ app.get("/download/:filename", (req, res) => {
       mtime: fs.statSync(path.join(outputRoot, d.name)).mtime,
     }))
     .sort((a, b) => b.mtime - a.mtime);
-
   for (const dir of dirs) {
     const filePath = path.join(dir.path, filename);
-    if (fs.existsSync(filePath)) {
-      return res.download(filePath);
-    }
+    if (fs.existsSync(filePath)) return res.download(filePath);
   }
-
   res.status(404).send("文件不存在");
 });
 
-// ===== 超时设置（保持不变） =====
-app.use((req, res, next) => {
-  req.setTimeout(600000); // 10 分钟
-  next();
-});
-
-// ===== 启动 =====
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ 服务器已启动，监听端口 ${PORT}`);
-  console.log(`🌐 访问地址: http://localhost:${PORT}`);
-});
+app.listen(PORT, () => console.log(`✅ 服务器运行在 http://localhost:${PORT}`));

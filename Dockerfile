@@ -58,6 +58,9 @@ RUN apt-get update && apt-get install -y \
     fonts-noto-color-emoji \
     fonts-symbola \
     fontconfig \
+    fonts-font-awesome \
+    fonts-liberation \
+    ttf-ubuntu-font-family \
     && rm -rf /var/lib/apt/lists/*
 
 RUN fc-cache -fv

@@ -58,7 +58,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
     console.log("链接:", url);
 
     try {
-      await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
+      await page.goto(url, { waitUntil: "networkidle0", timeout: 60000 });
 
       // 关闭弹窗
       const closeSelectors = [
@@ -88,7 +88,7 @@ async function runScreenshot(inputExcelPath, outputDir) {
       await page
         .waitForLoadState("networkidle", { timeout: 10000 })
         .catch(() => {});
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(3000);
 
       // ===== 1. 隐藏底部不需要的元素 =====
       await page.evaluate(() => {

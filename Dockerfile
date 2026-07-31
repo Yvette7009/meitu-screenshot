@@ -60,6 +60,9 @@ RUN apt-get update && apt-get install -y \
     fontconfig \
     fonts-font-awesome \
     fonts-liberation \
+    fonts-dejavu \
+    fonts-dejavu-core \
+    fonts-liberation \
     ttf-ubuntu-font-family \
     && rm -rf /var/lib/apt/lists/*
 

@@ -10,17 +10,18 @@ console.log("🚀 正在启动服务器...");
 const app = express();
 const CLEANUP_DAYS = 5;
 
-// 文件上传配置（增加大小限制）
+// ===== 文件上传配置（增加 fieldSize 限制） =====
 const upload = multer({
   dest: "uploads/",
   limits: {
     fileSize: 50 * 1024 * 1024, // 50MB
+    fieldSize: 20 * 1024 * 1024, // 20MB (防止表单字段过大)
   },
 });
 
 app.use(express.static("public"));
 
-// 清理旧目录函数
+// 清理旧目录函数（保持不变）
 async function cleanupOldOutputs() {
   const outputRoot = path.join(__dirname, "output");
   if (!fs.existsSync(outputRoot)) return;
@@ -40,42 +41,67 @@ async function cleanupOldOutputs() {
   }
 }
 
-app.post("/upload", upload.single("excel"), async (req, res) => {
-  console.log("📥 收到上传请求");
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "请上传 Excel 文件" });
+// ===== 上传路由（增加错误捕获） =====
+app.post("/upload", (req, res) => {
+  upload.single("excel")(req, res, async (err) => {
+    // 处理 Multer 错误
+    if (err) {
+      console.error("上传错误:", err);
+      if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res
+            .status(400)
+            .json({ error: "文件太大，请上传小于 50MB 的 Excel" });
+        }
+        return res.status(400).json({ error: `上传错误: ${err.message}` });
+      } else {
+        // 包括 Unexpected end of form 等
+        return res
+          .status(500)
+          .json({ error: "上传中断，请检查网络或文件大小，重试" });
+      }
     }
 
-    const inputPath = req.file.path;
-    const outputDir = path.join(__dirname, "output", Date.now().toString());
-    await fs.ensureDir(outputDir);
+    // 原处理逻辑（保持不变）
+    console.log("📥 收到上传请求");
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "请上传 Excel 文件" });
+      }
 
-    console.log("📸 开始执行截图...");
-    const result = await runScreenshot(inputPath, outputDir);
+      const inputPath = req.file.path;
+      const outputDir = path.join(__dirname, "output", Date.now().toString());
+      await fs.ensureDir(outputDir);
 
-    await fs.remove(inputPath);
+      console.log("📸 开始执行截图...");
+      const result = await runScreenshot(inputPath, outputDir);
 
-    // 异步清理旧目录（不阻塞响应）
-    cleanupOldOutputs().catch((err) => console.warn("清理旧目录时出错:", err));
+      await fs.remove(inputPath);
 
-    res.json({
-      success: true,
-      resultExcel: `/download/${path.basename(result.resultExcelPath)}`,
-      failedExcel: result.failedExcelPath
-        ? `/download/${path.basename(result.failedExcelPath)}`
-        : null,
-      total: result.total,
-      successCount: result.success,
-      failedCount: result.failed,
-    });
-    console.log("✅ 处理完成，已返回结果");
-  } catch (error) {
-    console.error("❌ 处理出错:", error);
-    res.status(500).json({ error: error.message });
-  }
+      // 异步清理旧目录（不阻塞响应）
+      cleanupOldOutputs().catch((err) =>
+        console.warn("清理旧目录时出错:", err),
+      );
+
+      res.json({
+        success: true,
+        resultExcel: `/download/${path.basename(result.resultExcelPath)}`,
+        failedExcel: result.failedExcelPath
+          ? `/download/${path.basename(result.failedExcelPath)}`
+          : null,
+        total: result.total,
+        successCount: result.success,
+        failedCount: result.failed,
+      });
+      console.log("✅ 处理完成，已返回结果");
+    } catch (error) {
+      console.error("❌ 处理出错:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 });
 
+// ===== 下载路由（保持不变） =====
 app.get("/download/:filename", (req, res) => {
   const filename = req.params.filename;
   const outputRoot = path.join(__dirname, "output");
@@ -83,7 +109,6 @@ app.get("/download/:filename", (req, res) => {
     return res.status(404).send("文件不存在");
   }
 
-  // 按修改时间倒序排列，最新的目录优先
   const dirs = fs
     .readdirSync(outputRoot, { withFileTypes: true })
     .filter((d) => d.isDirectory())
@@ -104,12 +129,13 @@ app.get("/download/:filename", (req, res) => {
   res.status(404).send("文件不存在");
 });
 
-// 增加超时时间（处理大型 Excel）
+// ===== 超时设置（保持不变） =====
 app.use((req, res, next) => {
   req.setTimeout(600000); // 10 分钟
   next();
 });
 
+// ===== 启动 =====
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ 服务器已启动，监听端口 ${PORT}`);

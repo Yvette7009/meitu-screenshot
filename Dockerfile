@@ -62,14 +62,11 @@ RUN apt-get update && apt-get install -y \
     fonts-liberation \
     fonts-dejavu \
     fonts-dejavu-core \
-    fonts-liberation \
-    ttf-ubuntu-font-family \
     && rm -rf /var/lib/apt/lists/*
 
 RUN fc-cache -fv
 
 WORKDIR /app
-
 COPY package*.json ./
 RUN npm install
 RUN npx playwright install chromium
@@ -77,5 +74,4 @@ RUN npx playwright install chromium
 COPY . .
 
 EXPOSE 3000
-
 CMD ["node", "server.js"]

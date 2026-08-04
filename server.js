@@ -9,22 +9,37 @@ console.log("🚀 正在启动服务器...");
 
 const app = express();
 const CLEANUP_DAYS = 5;
+const HISTORY_FILE = path.join(__dirname, "history.json");
 
-// 文件上传配置（增加大小限制）
+// ===== 文件上传配置 =====
 const upload = multer({
   dest: "uploads/",
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB
+    fileSize: 50 * 1024 * 1024,
+    fieldSize: 20 * 1024 * 1024,
   },
 });
 
 app.use(express.static("public"));
 
-// 清理旧目录函数
+// ===== 历史记录读写 =====
+function readHistory() {
+  try {
+    if (fs.existsSync(HISTORY_FILE)) {
+      return JSON.parse(fs.readFileSync(HISTORY_FILE, "utf8"));
+    }
+  } catch (e) {}
+  return [];
+}
+
+function writeHistory(history) {
+  fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
+}
+
+// ===== 清理旧目录 =====
 async function cleanupOldOutputs() {
   const outputRoot = path.join(__dirname, "output");
   if (!fs.existsSync(outputRoot)) return;
-
   const now = Date.now();
   const dirs = fs.readdirSync(outputRoot, { withFileTypes: true });
   for (const dir of dirs) {
@@ -40,50 +55,94 @@ async function cleanupOldOutputs() {
   }
 }
 
-app.post("/upload", upload.single("excel"), async (req, res) => {
-  console.log("📥 收到上传请求");
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "请上传 Excel 文件" });
+// ===== 上传路由 =====
+app.post("/upload", (req, res) => {
+  upload.single("excel")(req, res, async (err) => {
+    if (err) {
+      console.error("上传错误:", err);
+      if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res
+            .status(400)
+            .json({ error: "文件太大，请上传小于 50MB 的 Excel" });
+        }
+        return res.status(400).json({ error: `上传错误: ${err.message}` });
+      } else {
+        return res
+          .status(500)
+          .json({ error: "上传中断，请检查网络或文件大小，重试" });
+      }
     }
 
-    const inputPath = req.file.path;
-    const outputDir = path.join(__dirname, "output", Date.now().toString());
-    await fs.ensureDir(outputDir);
+    console.log("📥 收到上传请求");
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "请上传 Excel 文件" });
+      }
 
-    console.log("📸 开始执行截图...");
-    const result = await runScreenshot(inputPath, outputDir);
+      const inputPath = req.file.path;
+      const outputDir = path.join(__dirname, "output", Date.now().toString());
+      await fs.ensureDir(outputDir);
 
-    await fs.remove(inputPath);
+      console.log("📸 开始执行截图...");
+      const result = await runScreenshot(inputPath, outputDir);
 
-    // 异步清理旧目录（不阻塞响应）
-    cleanupOldOutputs().catch((err) => console.warn("清理旧目录时出错:", err));
+      await fs.remove(inputPath);
 
-    res.json({
-      success: true,
-      resultExcel: `/download/${path.basename(result.resultExcelPath)}`,
-      failedExcel: result.failedExcelPath
-        ? `/download/${path.basename(result.failedExcelPath)}`
-        : null,
-      total: result.total,
-      successCount: result.success,
-      failedCount: result.failed,
-    });
-    console.log("✅ 处理完成，已返回结果");
-  } catch (error) {
-    console.error("❌ 处理出错:", error);
-    res.status(500).json({ error: error.message });
-  }
+      // ===== 记录历史 =====
+      const history = readHistory();
+      history.push({
+        id: Date.now(),
+        timestamp: new Date().toLocaleString(),
+        inputFile: Buffer.from(req.file.originalname, "latin1").toString(
+          "utf8",
+        ),
+        outputFile: path.basename(result.resultExcelPath),
+        failedFile: result.failedExcelPath
+          ? path.basename(result.failedExcelPath)
+          : null,
+        total: result.total,
+        success: result.success,
+        failed: result.failed,
+        status:
+          result.failed > 0
+            ? result.success > 0
+              ? "partial"
+              : "failed"
+            : "success",
+      });
+      writeHistory(history);
+
+      // 异步清理旧目录
+      cleanupOldOutputs().catch((err) =>
+        console.warn("清理旧目录时出错:", err),
+      );
+
+      res.json({
+        success: true,
+        resultExcel: `/download/${path.basename(result.resultExcelPath)}`,
+        failedExcel: result.failedExcelPath
+          ? `/download/${path.basename(result.failedExcelPath)}`
+          : null,
+        total: result.total,
+        successCount: result.success,
+        failedCount: result.failed,
+      });
+      console.log("✅ 处理完成，已返回结果");
+    } catch (error) {
+      console.error("❌ 处理出错:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 });
 
+// ===== 下载路由 =====
 app.get("/download/:filename", (req, res) => {
   const filename = req.params.filename;
   const outputRoot = path.join(__dirname, "output");
   if (!fs.existsSync(outputRoot)) {
     return res.status(404).send("文件不存在");
   }
-
-  // 按修改时间倒序排列，最新的目录优先
   const dirs = fs
     .readdirSync(outputRoot, { withFileTypes: true })
     .filter((d) => d.isDirectory())
@@ -100,16 +159,22 @@ app.get("/download/:filename", (req, res) => {
       return res.download(filePath);
     }
   }
-
   res.status(404).send("文件不存在");
 });
 
-// 增加超时时间（处理大型 Excel）
+// ===== 历史记录接口 =====
+app.get("/history", (req, res) => {
+  const history = readHistory();
+  res.json(history);
+});
+
+// ===== 超时设置 =====
 app.use((req, res, next) => {
-  req.setTimeout(600000); // 10 分钟
+  req.setTimeout(600000);
   next();
 });
 
+// ===== 启动 =====
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ 服务器已启动，监听端口 ${PORT}`);

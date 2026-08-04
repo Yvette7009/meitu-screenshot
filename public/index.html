@@ -19,31 +19,12 @@
         );
         display: flex;
         justify-content: center;
-        align-items: center;
+        align-items: flex-start;
         min-height: 100vh;
         margin: 0;
         padding: 20px;
         position: relative;
         overflow-x: hidden;
-      }
-
-      /* 背景装饰小元素 */
-      body::before,
-      body::after {
-        content: "🌸";
-        position: fixed;
-        font-size: 24px;
-        opacity: 0.4;
-        pointer-events: none;
-      }
-      body::before {
-        top: 10%;
-        left: 8%;
-      }
-      body::after {
-        bottom: 15%;
-        right: 10%;
-        content: "✨";
       }
 
       .container {
@@ -54,21 +35,11 @@
         box-shadow:
           0 20px 60px rgba(255, 182, 193, 0.2),
           0 8px 24px rgba(0, 0, 0, 0.04);
-        max-width: 520px;
+        max-width: 720px;
         width: 100%;
         text-align: center;
         position: relative;
         border: 1px solid rgba(255, 255, 255, 0.8);
-      }
-
-      /* 顶部小装饰 */
-      .container::before {
-        content: "💖";
-        position: absolute;
-        top: -18px;
-        left: 50%;
-        transform: translateX(-50%);
-        font-size: 28px;
       }
 
       h1 {
@@ -132,16 +103,13 @@
         transition: all 0.3s ease;
         box-shadow: 0 6px 20px rgba(255, 158, 181, 0.4);
         letter-spacing: 1px;
+        margin: 4px;
       }
 
       button:hover:not(:disabled) {
         background: linear-gradient(135deg, #ff9eb5 0%, #ff85a2 100%);
         transform: translateY(-2px);
         box-shadow: 0 8px 24px rgba(255, 133, 162, 0.5);
-      }
-
-      button:active:not(:disabled) {
-        transform: translateY(0);
       }
 
       button:disabled {
@@ -198,6 +166,44 @@
       #downloadLinks a:nth-child(2):hover {
         box-shadow: 0 6px 18px rgba(184, 160, 255, 0.45);
       }
+
+      #historyContainer {
+        margin-top: 30px;
+        text-align: left;
+        max-height: 400px;
+        overflow-y: auto;
+        border: 1px solid #e0d6dc;
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(255, 245, 248, 0.5);
+        display: none;
+      }
+
+      #historyTable {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      #historyTable th {
+        background: #f0e4ea;
+        padding: 8px;
+        text-align: left;
+        position: sticky;
+        top: 0;
+        z-index: 2;
+      }
+
+      #historyTable td {
+        padding: 6px 8px;
+        border-bottom: 1px solid #eee;
+      }
+
+      #historyTable a {
+        color: #5a4a6b;
+        text-decoration: none;
+        font-weight: 500;
+      }
     </style>
   </head>
   <body>
@@ -218,10 +224,28 @@
           />
         </div>
         <button type="submit" id="submitBtn">✨ 开始处理</button>
+        <button type="button" id="historyBtn">📜 历史记录</button>
       </form>
 
       <div id="status"></div>
       <div id="downloadLinks"></div>
+
+      <div id="historyContainer">
+        <table id="historyTable">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>输入文件</th>
+              <th>总数</th>
+              <th>成功</th>
+              <th>失败</th>
+              <th>结果</th>
+              <th>失败记录</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
     </div>
 
     <script>
@@ -230,11 +254,13 @@
       const submitBtn = document.getElementById("submitBtn");
       const statusDiv = document.getElementById("status");
       const downloadDiv = document.getElementById("downloadLinks");
+      const historyBtn = document.getElementById("historyBtn");
+      const historyContainer = document.getElementById("historyContainer");
+      const historyBody = document.getElementById("historyBody");
 
       // 点击区域触发文件选择
       dropArea.addEventListener("click", () => fileInput.click());
 
-      // 拖拽支持
       dropArea.addEventListener("dragover", (e) => {
         e.preventDefault();
         dropArea.style.borderColor = "#ff85a2";
@@ -270,6 +296,7 @@
         }
       }
 
+      // 提交表单
       document
         .getElementById("uploadForm")
         .addEventListener("submit", async (e) => {
@@ -310,6 +337,11 @@
               linksHtml += `<a href="${data.failedExcel}" download>📋 下载失败记录</a>`;
             }
             downloadDiv.innerHTML = linksHtml;
+
+            // 刷新历史记录
+            if (historyContainer.style.display === "block") {
+              loadHistory();
+            }
           } catch (err) {
             statusDiv.textContent = "😢 " + err.message;
           } finally {
@@ -317,6 +349,56 @@
             submitBtn.textContent = "✨ 开始处理";
           }
         });
+
+      // 历史记录按钮
+      historyBtn.addEventListener("click", async () => {
+        const isVisible = historyContainer.style.display === "block";
+        if (isVisible) {
+          historyContainer.style.display = "none";
+        } else {
+          historyContainer.style.display = "block";
+          await loadHistory();
+        }
+      });
+
+      // 加载历史记录
+      async function loadHistory() {
+        try {
+          const response = await fetch("/history");
+          const history = await response.json();
+          historyBody.innerHTML = "";
+          if (history.length === 0) {
+            historyBody.innerHTML =
+              '<tr><td colspan="7" style="text-align:center;color:#999;padding:20px;">暂无记录</td></tr>';
+            return;
+          }
+          history.reverse().forEach((item) => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td>${item.timestamp}</td>
+              <td>${item.inputFile}</td>
+              <td>${item.total}</td>
+              <td>${item.success}</td>
+              <td>${item.failed}</td>
+              <td>${
+                item.outputFile
+                  ? `<a href="/download/${item.outputFile}" download>下载</a>`
+                  : "-"
+              }</td>
+              <td>${
+                item.failedFile
+                  ? `<a href="/download/${item.failedFile}" download>下载</a>`
+                  : "-"
+              }</td>
+            `;
+            historyBody.appendChild(tr);
+          });
+        } catch (e) {
+          console.error("加载历史记录失败", e);
+          historyBody.innerHTML =
+            '<tr><td colspan="7" style="text-align:center;color:red;padding:20px;">加载失败</td></tr>';
+        }
+      }
     </script>
   </body>
 </html>
